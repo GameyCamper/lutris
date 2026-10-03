@@ -80,6 +80,21 @@ class vice(Runner):
             "choices": platform_dict,
             "default": next(iter(platform_dict.values())),
         },
+        {
+            "option": "ramexpansion",
+            "type": "choice",
+            "section": _("VIC20"),
+            "label": _("RAM expansion"),
+            "choices": [
+                ("None", "none"),
+                ("3K", "3k"),
+                ("8K", "8k"),
+                ("16K", "16k"),
+                ("24K", "24k"),
+                ("32K", "all"),
+            ],
+            "default": "none",
+        },
     ]
 
     def get_executable(self, machine: str | None = None) -> str:
@@ -117,6 +132,14 @@ class vice(Runner):
 
         super().install(install_ui_delegate, version, on_runner_installed)
 
+    def get_extra_libs(self):
+        root_dir = os.path.dirname(os.path.dirname(self.get_executable()))
+        return os.path.join(root_dir, "lib64")
+
+    def get_roms_location(self):
+        lib_dir = self.get_extra_libs()
+        return os.path.join(lib_dir, "vice")
+
     def get_roms_path(self, machine=None):
         if not machine:
             machine = "c64"
@@ -126,10 +149,11 @@ class vice(Runner):
             "vic20": "VIC20",
             "pet": "PET",
             "plus4": "PLUS4",
-            "cmbii": "CBM-II",
+            "cbmii": "CBM-II",
         }
         root_dir = os.path.dirname(os.path.dirname(self.get_executable()))
-        return os.path.join(root_dir, "lib64/vice", paths[machine])
+        rom_dir = self.get_roms_location()
+        return os.path.join(rom_dir, paths[machine])
 
     @staticmethod
     def get_option_prefix(machine):
@@ -169,17 +193,23 @@ class vice(Runner):
 
     def play(self):
         machine = self.runner_config.get("platform") or self.runner_config.get("machine")
-
+ 
         rom = self.game_config.get("main_file")
         if not rom:
             raise GameConfigError(_("No rom provided"))
         if not system.path_exists(rom):
             raise MissingGameExecutableError(filename=rom)
 
+        extra_libs = self.get_extra_libs()
+        if extra_libs:
+            output["ld_library_path"] = os.pathsep.join(extra_libs)
+
         params = [self.get_executable(machine)]
         rom_dir = os.path.dirname(rom)
         params.append("-chdir")
         params.append(rom_dir)
+        params.append("-directory")
+        params.append(self.get_roms_location())
         option_prefix = self.get_option_prefix(machine)
 
         if self.runner_config.get("fullscreen"):
@@ -189,7 +219,7 @@ class vice(Runner):
             params.append("-{}dsize".format(option_prefix))
 
         if self.runner_config.get("renderer"):
-            params.append("-sdl2renderer")
+            params.append("-sdl2backend")
             params.append(self.runner_config["renderer"])
 
         if not self.runner_config.get("aspect_ratio", True):
