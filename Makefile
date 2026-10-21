@@ -32,12 +32,13 @@ help:
 
 test:
 	rm tests/fixtures/pga.db -f
-	nose2
+	nose2 $(TEST)
 
 cover:
 	rm tests/fixtures/pga.db -f
 	rm tests/coverage/ -rf
-	nose2 --with-coverage --cover-package=lutris --cover-html --cover-html-dir=tests/coverage
+	coverage run --source=lutris -m nose2
+	coverage html -d tests/coverage
 
 # ==================
 # Environment setup
@@ -45,7 +46,7 @@ cover:
 
 req-python:
 	pip3 install PyYAML lxml requests Pillow setproctitle python-magic distro dbus-python types-requests \
-	 types-PyYAML evdev PyGObject pypresence protobuf moddb
+	 types-PyYAML evdev PyGObject pypresence protobuf moddb coverage
 install-hooks:
 	ln -sf -t .git/hooks/ ../../.hooks/pre-commit
 
