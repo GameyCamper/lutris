@@ -84,14 +84,26 @@ class o2em(Runner):
         },
     ]
 
-    def install(self, install_ui_delegate, version=None, callback=None):
-        def on_runner_installed(*args):
+    def get_post_install_callback(self):
+        """Return callback for O2EM-specific post-installation tasks."""
+
+        def on_runner_installed():
             if not system.path_exists(self.bios_path):
                 os.makedirs(self.bios_path)
+
+        return on_runner_installed
+
+    def install(self, install_ui_delegate, version=None, callback=None):
+        # Get the post-install callback and combine with the provided callback
+        post_install = self.get_post_install_callback()
+
+        def combined_callback():
+            if post_install:
+                post_install()
             if callback:
                 callback()
 
-        super().install(install_ui_delegate, version, on_runner_installed)
+        super().install(install_ui_delegate, version, combined_callback)
 
     def play(self):
         arguments = ["-biosdir=%s" % self.bios_path]

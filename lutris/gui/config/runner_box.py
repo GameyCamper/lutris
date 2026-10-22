@@ -1,10 +1,12 @@
+import os
 from gettext import gettext as _
 
-from gi.repository import GObject, Gtk
+from gi.repository import GLib, GObject, Gtk
 
 from lutris import runners
 from lutris.gui.config.runner import RunnerConfigDialog
 from lutris.gui.dialogs import QuestionDialog
+from lutris.gui.dialogs.extract import ExtractDialog
 from lutris.gui.dialogs.runner_install import RunnerInstallDialog
 from lutris.gui.widgets.scaled_image import ScaledImage
 from lutris.util.log import logger
@@ -53,31 +55,49 @@ class RunnerBox(Gtk.Box):
         self.configure_button = Gtk.Button.new_from_icon_name("preferences-system-symbolic", Gtk.IconSize.BUTTON)
         self.configure_button.set_valign(Gtk.Align.CENTER)
         self.configure_button.set_margin_right(12)
+        self.configure_button.set_tooltip_text(_("Edit runner and system options"))
         self.configure_button.connect("clicked", self.on_configure_clicked)
         self.pack_start(self.configure_button, False, False, 0)
         if not self.runner.is_installed():
             self.runner_label_box.set_sensitive(False)
         self.configure_button.show()
+
         self.action_alignment = Gtk.Alignment.new(0.5, 0.5, 0, 0)
+        self.action_alignment.set_margin_right(12)
         self.action_alignment.show()
         self.action_alignment.add(self.get_action_button())
         self.pack_start(self.action_alignment, False, False, 0)
+
+        # Add local install button for runners that can be installed
+        # Must be packed after action_alignment to be to the right of the install button
+        if not self.runner.is_installed():
+            self.local_install_button = Gtk.Button.new_from_icon_name("document-open-symbolic", Gtk.IconSize.BUTTON)
+            self.local_install_button.set_valign(Gtk.Align.CENTER)
+            self.local_install_button.set_tooltip_text(_("Install runner from local file"))
+            self.local_install_button.connect("clicked", self.on_local_install_clicked)
+            self.pack_start(self.local_install_button, False, False, 0)
+            self.local_install_button.show()
+        else:
+            self.local_install_button = None
 
     def get_action_button(self):
         """Return a install or remove button"""
         if self.runner.multiple_versions:
             _button = Gtk.Button.new_from_icon_name("system-software-install-symbolic", Gtk.IconSize.BUTTON)
             _button.get_style_context().add_class("circular")
+            _button.set_tooltip_text(_("Manage runner versions"))
             _button.connect("clicked", self.on_versions_clicked)
         else:
             if self.runner.can_uninstall():
                 _button = Gtk.Button.new_from_icon_name("edit-delete-symbolic", Gtk.IconSize.BUTTON)
                 _button.get_style_context().add_class("circular")
+                _button.set_tooltip_text(_("Remove runner"))
                 _button.connect("clicked", self.on_remove_clicked)
                 _button.set_sensitive(self.runner.can_uninstall())
             else:
                 _button = Gtk.Button.new_from_icon_name("system-software-install-symbolic", Gtk.IconSize.BUTTON)
                 _button.get_style_context().add_class("circular")
+                _button.set_tooltip_text(_("Install runner from Lutris repository"))
                 _button.connect("clicked", self.on_install_clicked)
                 _button.set_sensitive(not self.runner.is_installed(flatpak_allowed=False))
         _button.show()
@@ -96,6 +116,61 @@ class RunnerBox(Gtk.Box):
 
         if self.runner.is_installed():
             self.emit("runner-installed")
+
+    def on_local_install_clicked(self, widget):
+        """Install a runner from a local .gz file."""
+        dialog = Gtk.FileChooserNative.new(
+            _("Select runner archive"),
+            self.get_toplevel(),
+            Gtk.FileChooserAction.OPEN,
+            _("_Open"),
+            _("_Cancel"),
+        )
+        dialog.set_current_folder(os.path.expanduser("~/Downloads"))
+        filter_gz = Gtk.FileFilter()
+        filter_gz.set_name(_("Gzip archives (*.gz)"))
+        filter_gz.add_pattern("*.gz")
+        filter_gz.add_pattern("*.tar.gz")
+        dialog.add_filter(filter_gz)
+
+        response = dialog.run()
+        if response == Gtk.ResponseType.ACCEPT:
+            archive_path = dialog.get_filename()
+            dialog.destroy()
+            logger.debug("Installing %s from local file: %s", self.runner.name, archive_path)
+
+            # Show extraction dialog
+            extract_dialog = ExtractDialog(
+                archive_path=archive_path,
+                dest_path=self.runner.directory,
+                title=_("Installing {}").format(self.runner.human_name),
+                parent=self.get_toplevel(),
+            )
+
+            # Define extraction function that calls the runner's install_from_local method
+            def extract_func(archive_path, dest_path):
+                try:
+                    # Define callback to emit runner-installed signal
+                    def on_install_complete():
+                        if self.runner.is_installed():
+                            # Schedule on main thread
+                            GLib.idle_add(lambda: self.emit("runner-installed"))
+
+                    self.runner.install_from_local(archive_path, callback=on_install_complete)
+                    return True, None
+                except Exception as e:
+                    logger.exception("Failed to install runner from local file: %s", e)
+                    return False, str(e)
+
+            extract_dialog.start(extract_func)
+
+            result = extract_dialog.run()
+            extract_dialog.destroy()
+
+            if result != Gtk.ResponseType.OK:
+                logger.warning("Installation was cancelled or failed")
+        else:
+            dialog.destroy()
 
     def on_configure_clicked(self, widget):
         window = self.get_toplevel()
@@ -122,9 +197,21 @@ class RunnerBox(Gtk.Box):
         self.runner_label_box.set_sensitive(True)
         self.action_alignment.get_children()[0].destroy()
         self.action_alignment.add(self.get_action_button())
+        if self.local_install_button:
+            self.local_install_button.destroy()
+            self.local_install_button = None
 
     def on_runner_removed(self, widget):
         """Called after the runner is removed"""
         self.runner_label_box.set_sensitive(False)
         self.action_alignment.get_children()[0].destroy()
         self.action_alignment.add(self.get_action_button())
+        # Add local install button back when runner is removed
+        # Must be packed after action_alignment to maintain correct order
+        if not self.local_install_button:
+            self.local_install_button = Gtk.Button.new_from_icon_name("document-open-symbolic", Gtk.IconSize.BUTTON)
+            self.local_install_button.set_valign(Gtk.Align.CENTER)
+            self.local_install_button.set_tooltip_text(_("Install runner from local file"))
+            self.local_install_button.connect("clicked", self.on_local_install_clicked)
+            self.pack_start(self.local_install_button, False, False, 0)
+            self.local_install_button.show()

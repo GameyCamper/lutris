@@ -9,6 +9,31 @@ You are free to use any tool available to help you create your contributions.
 Contributions that break those rules are subject to being closed without notice.
 If we are particularly impressed by how bad a contribution, we reserve the right to instantly and permanently ban the author from our Github account without notice.
 
+NEW
+---
+
+$ sudo apt install python3-pip
+$ sudo apt install python3.14-venv
+
+$ sudo apt install python3-full
+sudo apt install pipx
+sudo apt install pkg-config cmake libdbus-1-dev libcairo2-dev libgirepository-2.0-dev
+
+sudo apt install  pkg-config
+
+$ python3 -m venv venv
+
+$ source venv/bin/activate
+
+
+
+$ make req-python dev
+
+
+To Run lutris then ensure the the following line is added tp your .bashrc file;
+
+export LUTRIS_ALLOW_LOCAL_PYTHON_PACKAGES=1
+
 
 Finding features to work on
 ---------------------------

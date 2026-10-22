@@ -74,15 +74,29 @@ class reicast(Runner):
             },
         ]
 
-    def install(self, install_ui_delegate, version=None, callback=None):
-        def on_runner_installed(*args):
+    def get_post_install_callback(self):
+        """Return callback for Reicast-specific post-installation tasks."""
+
+        def on_runner_installed():
             mapping_path = system.create_folder("~/.reicast/mappings")
             mapping_source = os.path.join(settings.RUNNER_DIR, "reicast/mappings")
             for mapping_file in os.listdir(mapping_source):
                 shutil.copy(os.path.join(mapping_source, mapping_file), mapping_path)
             system.create_folder("~/.reicast/data")
 
-        super().install(install_ui_delegate, version, on_runner_installed)
+        return on_runner_installed
+
+    def install(self, install_ui_delegate, version=None, callback=None):
+        # Get the post-install callback and combine with the provided callback
+        post_install = self.get_post_install_callback()
+
+        def combined_callback():
+            if post_install:
+                post_install()
+            if callback:
+                callback()
+
+        super().install(install_ui_delegate, version, combined_callback)
 
     def get_joypads(self):
         """Return list of joypad in a format usable in the options"""

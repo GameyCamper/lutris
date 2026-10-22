@@ -117,8 +117,10 @@ class vice(Runner):
         except KeyError as ex:
             raise MisconfigurationError("Invalid machine '%s'" % machine) from ex
 
-    def install(self, install_ui_delegate, version=None, callback=None):
-        def on_runner_installed(*args):
+    def get_post_install_callback(self):
+        """Return callback for Vice-specific post-installation tasks."""
+
+        def on_runner_installed():
             config_path = system.create_folder("~/.vice")
             lib_dir = os.path.join(settings.RUNNER_DIR, "vice/lib/vice")
             if not system.path_exists(lib_dir):
@@ -127,18 +129,28 @@ class vice(Runner):
                 logger.error("Missing lib folder in the Vice runner")
             else:
                 system.merge_folders(lib_dir, config_path)
+
+        return on_runner_installed
+
+    def install(self, install_ui_delegate, version=None, callback=None):
+        # Get the post-install callback and combine with the provided callback
+        post_install = self.get_post_install_callback()
+
+        def combined_callback():
+            if post_install:
+                post_install()
             if callback:
                 callback()
 
-        super().install(install_ui_delegate, version, on_runner_installed)
+        super().install(install_ui_delegate, version, combined_callback)
 
     def get_extra_libs(self):
         root_dir = os.path.dirname(os.path.dirname(self.get_executable()))
         return os.path.join(root_dir, "lib64")
 
     def get_roms_location(self):
-        lib_dir = self.get_extra_libs()
-        return os.path.join(lib_dir, "vice")
+        root_dir = os.path.dirname(os.path.dirname(self.get_executable()))
+        return os.path.join(root_dir, "share/vice")
 
     def get_roms_path(self, machine=None):
         if not machine:
@@ -151,7 +163,6 @@ class vice(Runner):
             "plus4": "PLUS4",
             "cbmii": "CBM-II",
         }
-        root_dir = os.path.dirname(os.path.dirname(self.get_executable()))
         rom_dir = self.get_roms_location()
         return os.path.join(rom_dir, paths[machine])
 
@@ -193,16 +204,12 @@ class vice(Runner):
 
     def play(self):
         machine = self.runner_config.get("platform") or self.runner_config.get("machine")
- 
+
         rom = self.game_config.get("main_file")
         if not rom:
             raise GameConfigError(_("No rom provided"))
         if not system.path_exists(rom):
             raise MissingGameExecutableError(filename=rom)
-
-        extra_libs = self.get_extra_libs()
-        if extra_libs:
-            output["ld_library_path"] = os.pathsep.join(extra_libs)
 
         params = [self.get_executable(machine)]
         rom_dir = os.path.dirname(rom)
@@ -229,9 +236,22 @@ class vice(Runner):
         if self.runner_config.get("drivesound"):
             params.append("-drivesound")
 
+        ramexpansion = self.runner_config.get("ramexpansion")
+        if machine == "vic20" and ramexpansion and ramexpansion != "none":
+            params.append("-memory")
+            params.append(ramexpansion)
+
         if self.runner_config.get("joy"):
             for dev in range(self.get_joydevs(machine)):
                 params += ["-joydev{}".format(dev + 1), "4"]
 
+        command = {"command": params}
+
+        extra_libs = self.get_extra_libs()
+        if extra_libs:
+            env = self.get_env()
+            env["LD_LIBRARY_PATH"] = os.pathsep.join(filter(None, [extra_libs, env.get("LD_LIBRARY_PATH")]))
+            command.update({"env": env})
+
         params.extend(self.get_rom_args(machine, rom))
-        return {"command": params}
+        return command

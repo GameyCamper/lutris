@@ -86,6 +86,8 @@ class atari800(Runner):
     ]
 
     def install(self, install_ui_delegate, version=None, callback=None):
+        # Atari800 needs special handling that requires install_ui_delegate
+        # and downloads additional files, so we keep the full override here
         def on_runner_installed(*_args):
             config_path = system.create_folder("~/.atari800")
             bios_archive = os.path.join(config_path, "atari800-bioses.zip")

@@ -652,6 +652,53 @@ class Runner:  # pylint: disable=too-many-public-methods
         url: str = runner_version_info["url"]
         self.download_and_extract(url, **opts)
 
+    def get_post_install_callback(self) -> Callable[[], None] | None:
+        """Return a callback for runner-specific post-installation tasks.
+
+        Subclasses can override this to provide custom post-installation logic
+        that will be called after both web downloads and local file installations.
+
+        Returns:
+            A callback function or None if no custom logic is needed.
+        """
+        return None
+
+    def install_from_local(
+        self,
+        archive_path: str,
+        callback: Callable[[], None] | None = None,
+    ) -> None:
+        """Install runner from a local archive file.
+
+        Args:
+            archive_path: Path to the local archive file (.gz, .tar.gz, etc.)
+            callback: UI callback for updating the interface
+        """
+        logger.debug("Installing %s from local archive: %s", self.name, archive_path)
+
+        if not system.path_exists(archive_path, exclude_empty=True):
+            raise RunnerInstallationError(_("Archive file not found: {}").format(archive_path))
+
+        # Get runner-specific post-install callback
+        post_install_callback = self.get_post_install_callback()
+
+        # Combine callbacks: post-install callback first, then UI callback
+        def combined_callback():
+            if post_install_callback:
+                post_install_callback()
+            if callback:
+                callback()
+
+        # Use the existing extract method with the runner's directory
+        # Don't delete the archive file for local installs
+        self.extract(
+            archive=archive_path,
+            dest=self.directory,
+            merge_single=True,
+            callback=combined_callback,
+            delete_archive=False,
+        )
+
     def download_and_extract(self, url: str, **opts: Any) -> None:
         dest = opts.get("dest")
         install_ui_delegate = opts["install_ui_delegate"]
@@ -669,7 +716,12 @@ class Runner:  # pylint: disable=too-many-public-methods
             logger.info("Download canceled by the user.")
 
     def extract(
-        self, archive: str, dest: str, merge_single: bool = False, callback: Callable[[], None] | None = None
+        self,
+        archive: str,
+        dest: str,
+        merge_single: bool = False,
+        callback: Callable[[], None] | None = None,
+        delete_archive: bool = True,
     ) -> None:
         if not system.path_exists(archive, exclude_empty=True):
             raise RunnerInstallationError(_("Failed to extract {}").format(archive))
@@ -678,7 +730,8 @@ class Runner:  # pylint: disable=too-many-public-methods
         except ExtractError as ex:
             logger.error("Failed to extract the archive %s file may be corrupt", archive)
             raise RunnerInstallationError(_("Failed to extract {}: {}").format(archive, ex)) from ex
-        os.remove(archive)
+        if delete_archive:
+            os.remove(archive)
 
         if self.name == "wine":
             logger.debug("Clearing wine version cache")

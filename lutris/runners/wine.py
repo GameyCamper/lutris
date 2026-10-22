@@ -914,6 +914,9 @@ class wine(Runner):
             if callback:
                 callback()
             return
+
+        # Wine's post-installation logic (cache clearing) is handled by the base Runner class
+        # so we just call super().install() with the callback
         super().install(install_ui_delegate, version=version, callback=callback)
 
     def get_installer_runner_version(
