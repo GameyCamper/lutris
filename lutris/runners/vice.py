@@ -80,6 +80,21 @@ class vice(Runner):
             "choices": platform_dict,
             "default": next(iter(platform_dict.values())),
         },
+        {
+            "option": "ramexpansion",
+            "type": "choice",
+            "section": _("VIC20"),
+            "label": _("RAM expansion"),
+            "choices": [
+                ("None", "none"),
+                ("3K", "3k"),
+                ("8K", "8k"),
+                ("16K", "16k"),
+                ("24K", "24k"),
+                ("32K", "all"),
+            ],
+            "default": "none",
+        },
     ]
 
     def get_executable(self, machine: str | None = None) -> str:
@@ -102,8 +117,10 @@ class vice(Runner):
         except KeyError as ex:
             raise MisconfigurationError("Invalid machine '%s'" % machine) from ex
 
-    def install(self, install_ui_delegate, version=None, callback=None):
-        def on_runner_installed(*args):
+    def get_post_install_callback(self):
+        """Return callback for Vice-specific post-installation tasks."""
+
+        def on_runner_installed():
             config_path = system.create_folder("~/.vice")
             lib_dir = os.path.join(settings.RUNNER_DIR, "vice/lib/vice")
             if not system.path_exists(lib_dir):
@@ -112,10 +129,28 @@ class vice(Runner):
                 logger.error("Missing lib folder in the Vice runner")
             else:
                 system.merge_folders(lib_dir, config_path)
+
+        return on_runner_installed
+
+    def install(self, install_ui_delegate, version=None, callback=None):
+        # Get the post-install callback and combine with the provided callback
+        post_install = self.get_post_install_callback()
+
+        def combined_callback():
+            if post_install:
+                post_install()
             if callback:
                 callback()
 
-        super().install(install_ui_delegate, version, on_runner_installed)
+        super().install(install_ui_delegate, version, combined_callback)
+
+    def get_extra_libs(self):
+        root_dir = os.path.dirname(os.path.dirname(self.get_executable()))
+        return os.path.join(root_dir, "lib64")
+
+    def get_roms_location(self):
+        root_dir = os.path.dirname(os.path.dirname(self.get_executable()))
+        return os.path.join(root_dir, "share/vice")
 
     def get_roms_path(self, machine=None):
         if not machine:
@@ -126,10 +161,10 @@ class vice(Runner):
             "vic20": "VIC20",
             "pet": "PET",
             "plus4": "PLUS4",
-            "cmbii": "CBM-II",
+            "cbmii": "CBM-II",
         }
-        root_dir = os.path.dirname(os.path.dirname(self.get_executable()))
-        return os.path.join(root_dir, "lib64/vice", paths[machine])
+        rom_dir = self.get_roms_location()
+        return os.path.join(rom_dir, paths[machine])
 
     @staticmethod
     def get_option_prefix(machine):
@@ -180,6 +215,8 @@ class vice(Runner):
         rom_dir = os.path.dirname(rom)
         params.append("-chdir")
         params.append(rom_dir)
+        params.append("-directory")
+        params.append(self.get_roms_location())
         option_prefix = self.get_option_prefix(machine)
 
         if self.runner_config.get("fullscreen"):
@@ -189,7 +226,7 @@ class vice(Runner):
             params.append("-{}dsize".format(option_prefix))
 
         if self.runner_config.get("renderer"):
-            params.append("-sdl2renderer")
+            params.append("-sdl2backend")
             params.append(self.runner_config["renderer"])
 
         if not self.runner_config.get("aspect_ratio", True):
@@ -199,9 +236,22 @@ class vice(Runner):
         if self.runner_config.get("drivesound"):
             params.append("-drivesound")
 
+        ramexpansion = self.runner_config.get("ramexpansion")
+        if machine == "vic20" and ramexpansion and ramexpansion != "none":
+            params.append("-memory")
+            params.append(ramexpansion)
+
         if self.runner_config.get("joy"):
             for dev in range(self.get_joydevs(machine)):
                 params += ["-joydev{}".format(dev + 1), "4"]
 
+        command = {"command": params}
+
+        extra_libs = self.get_extra_libs()
+        if extra_libs:
+            env = self.get_env()
+            env["LD_LIBRARY_PATH"] = os.pathsep.join(filter(None, [extra_libs, env.get("LD_LIBRARY_PATH")]))
+            command.update({"env": env})
+
         params.extend(self.get_rom_args(machine, rom))
-        return {"command": params}
+        return command

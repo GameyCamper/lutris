@@ -119,6 +119,8 @@ class hatari(Runner):
     ]
 
     def install(self, install_ui_delegate, version=None, callback=None):
+        # Hatari needs special handling that requires install_ui_delegate
+        # so we keep the full override here
         def on_runner_installed(*args):
             bios_path = system.create_folder("~/.hatari/bios")
 

@@ -97,6 +97,8 @@ class redream(Runner):
     ]
 
     def install(self, install_ui_delegate, version=None, callback=None):
+        # Redream needs special handling that requires install_ui_delegate
+        # so we keep the full override here
         def on_runner_installed(*args):
             license_filename = install_ui_delegate.show_install_file_inquiry(
                 question=_("Do you want to select a premium license file?"),

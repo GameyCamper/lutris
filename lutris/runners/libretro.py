@@ -312,24 +312,36 @@ class libretro(Runner):
             raise UnspecifiedVersionError(_("The installer does not specify the libretro 'core' version."))
         return version
 
-    def install(self, install_ui_delegate, version=None, callback=None):
-        captured_super = super()  # super() does not work inside install_core()
+    def get_post_install_callback(self):
+        """Return callback for libretro-specific post-installation tasks."""
 
         def on_installed():
             get_libretro_cores.cache_clear()
+
+        return on_installed
+
+    def install(self, install_ui_delegate, version=None, callback=None):
+        captured_super = super()  # super() does not work inside install_core()
+
+        # Get the post-install callback and combine with the provided callback
+        post_install = self.get_post_install_callback()
+
+        def combined_callback():
+            if post_install:
+                post_install()
             if callback:
                 callback()
 
         def install_core():
             if not version:
-                on_installed()
+                combined_callback()
             else:
-                captured_super.install(install_ui_delegate, version, on_installed)
+                captured_super.install(install_ui_delegate, version, combined_callback)
 
         if not super().is_installed():
             captured_super.install(install_ui_delegate, version=None, callback=install_core)
         else:
-            captured_super.install(install_ui_delegate, version, on_installed)
+            captured_super.install(install_ui_delegate, version, combined_callback)
 
     def get_run_data(self):
         return {
